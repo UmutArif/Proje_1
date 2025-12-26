@@ -1,0 +1,130 @@
+import serial
+import time
+import ctypes
+from ctypes import wintypes
+import sys
+
+# --- AYARLAR ---
+ARDUINO_PORT = 'COM3'  # Portunu kontrol et
+BAUD_RATE = 9600
+TOLERANS = 30          # Hassasiyet
+
+# Windows API Tanımları
+gdi32 = ctypes.windll.gdi32
+user32 = ctypes.windll.user32
+
+# Gerekli Yapılar
+class RAMP(ctypes.Structure):
+    _fields_ = [("Red", wintypes.WORD * 256),
+                ("Green", wintypes.WORD * 256),
+                ("Blue", wintypes.WORD * 256)]
+
+# GLOBAL DEĞİŞKEN: Başlangıçtaki ayarı burada saklayacağız
+baslangic_snapshot = RAMP()
+
+def get_current_gamma_ramp(hdc):
+    """Şu anki ekran renk tablosunu (LUT) okur."""
+    buffer = RAMP()
+    # Windows API'den mevcut dizilimi al
+    success = gdi32.GetDeviceGammaRamp(hdc, ctypes.byref(buffer))
+    return buffer, success
+
+def save_initial_snapshot():
+    """Program başlarken ekranın o anki halini kopyalar."""
+    global baslangic_snapshot
+    hdc = user32.GetDC(None)
+    
+    if hdc:
+        print(">> [SNAPSHOT] Şu anki ekran renk ayarları hafızaya kopyalanıyor...")
+        buffer, success = get_current_gamma_ramp(hdc)
+        if success:
+            baslangic_snapshot = buffer
+            print(">> [BAŞARILI] Başlangıç ayarları güvenli bir şekilde saklandı.")
+        else:
+            print(">> [HATA] Başlangıç ayarları okunamadı!")
+        user32.ReleaseDC(None, hdc)
+    else:
+        print(">> [HATA] Ekrana erişilemedi.")
+
+def restore_snapshot():
+    """Hafızadaki başlangıç ayarını ekrana geri yükler."""
+    print("\n>> [GERİ YÜKLEME] Ekran, başlangıçtaki ayarlara döndürülüyor...")
+    hdc = user32.GetDC(None)
+    
+    if hdc:
+        # Sakladığımız 'baslangic_snapshot' verisini tekrar ekran kartına yazıyoruz
+        success = gdi32.SetDeviceGammaRamp(hdc, ctypes.byref(baslangic_snapshot))
+        user32.ReleaseDC(None, hdc)
+        
+        if success:
+            print(">> [TAMAMLANDI] Ekran eski haline döndü (Restart gerekmez).")
+            return True
+        else:
+            print(">> [HATA] Geri yükleme başarısız oldu.")
+            return False
+
+def main():
+    print("--- ZARARSIZ EKRAN KORUMA SİSTEMİ ---")
+    
+    # 1. BAŞLANGIÇTA SNAPSHOT AL
+    save_initial_snapshot()
+    
+    try:
+        ser = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)
+
+        # 2. Sensör Referansını Al (Işık Şiddeti İçin)
+        print("\n[KALİBRASYON] Sensörü ekrana sabitleyin, ışık ölçülüyor...")
+        time.sleep(2)
+        
+        referans_isik = 0
+        for _ in range(10): # 10 örnek al ortalama bul
+            line = ser.readline().decode('utf-8').strip()
+            if line: parts = line.split(','); referans_isik += int(parts[1])
+            time.sleep(0.1)
+        referans_isik //= 10
+        
+        print(f">> Referans Işık Değeri: {referans_isik}")
+        print(">> Sistem izlemeye başladı. Sapma olursa başlangıca dönecek.\n")
+
+        # 3. İZLEME DÖNGÜSÜ
+        while True:
+            if ser.in_waiting > 0:
+                try:
+                    line = ser.readline().decode('utf-8').strip()
+                    parts = line.split(',')
+                    
+                    if len(parts) == 3:
+                        anlik_isik = int(parts[1]) # Yeşil kanalını takip et
+                        
+                        fark = abs(anlik_isik - referans_isik)
+                        
+                        # Eğer sapma varsa
+                        if fark > TOLERANS:
+                            print(f"\n[SAPMA TESPİTİ] Değer: {anlik_isik} (Ref: {referans_isik})")
+                            
+                            # Kullanıcıya sormadan direkt düzeltsin mi? Yoksa sorsun mu?
+                            # Burası "Soru Sorma" versiyonudur:
+                            print("Ayarlar değişmiş görünüyor. Başlangıç haline dönülsün mü?")
+                            onay = input(">> (e/h): ")
+                            
+                            if onay.lower() == 'e':
+                                restore_snapshot() # <--- SİHİRLİ KOMUT BURADA
+                                
+                                print("Sistem 3 saniye bekliyor...")
+                                time.sleep(3)
+                                ser.reset_input_buffer()
+                            else:
+                                print("Müdahale edilmedi.")
+                                time.sleep(2)
+
+                except ValueError:
+                    pass
+                    
+    except serial.SerialException:
+        print("Hata: Arduino bağlı değil.")
+    except KeyboardInterrupt:
+        print("\nÇıkış yapılıyor.")
+
+if __name__ == "__main__":
+    main()
