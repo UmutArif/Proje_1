@@ -1,0 +1,94 @@
+// TCS3200 Renk Sensörü Pinleri
+#define S0 4
+#define S1 5
+#define S2 6
+#define S3 7
+#define sensorOut 8
+
+// ==========================================
+// --- AYARLAMA BÖLÜMÜ (BURAYI DÜZENLE) ---
+// ==========================================
+// Beyaz ekranda okuduğun en DÜŞÜK değeri -> min kısmına
+// Siyah ekranda okuduğun en YÜKSEK değeri -> max kısmına yaz.
+
+// KIRMIZI (Red) Kalibrasyonu
+int r_min = 25;   
+int r_max = 320;  
+
+// YEŞİL (Green) Kalibrasyonu
+int g_min = 28;   
+int g_max = 340;  
+
+// MAVİ (Blue) Kalibrasyonu
+int b_min = 20;   
+int b_max = 290;  
+// ==========================================
+
+int frequency = 0;
+int r_val, g_val, b_val;
+
+void setup() {
+  // Pin Modlarını Ayarla
+  pinMode(S0, OUTPUT);
+  pinMode(S1, OUTPUT);
+  pinMode(S2, OUTPUT);
+  pinMode(S3, OUTPUT);
+  pinMode(sensorOut, INPUT);
+  
+  // Frekans Ölçekleme: %20 (Arduino için en kararlı mod budur)
+  digitalWrite(S0, HIGH);
+  digitalWrite(S1, LOW);
+  
+  // Seri Haberleşmeyi Başlat (Python'daki 9600 ile aynı olmalı)
+  Serial.begin(9600);
+}
+
+void loop() {
+  // ------------------------------------------------
+  // 1. KIRMIZI RENGİ OKU
+  // ------------------------------------------------
+  digitalWrite(S2, LOW);
+  digitalWrite(S3, LOW);
+  frequency = pulseIn(sensorOut, LOW);
+  
+  // Frekansı 0-255 arasına haritala
+  r_val = map(frequency, r_min, r_max, 255, 0);
+  r_val = constrain(r_val, 0, 255); // Değerin taşmasını önle
+  delay(50); // Sensöre nefes aldır
+
+  // ------------------------------------------------
+  // 2. YEŞİL RENGİ OKU
+  // ------------------------------------------------
+  digitalWrite(S2, HIGH);
+  digitalWrite(S3, HIGH);
+  frequency = pulseIn(sensorOut, LOW);
+  
+  g_val = map(frequency, g_min, g_max, 255, 0);
+  g_val = constrain(g_val, 0, 255);
+  delay(50);
+
+  // ------------------------------------------------
+  // 3. MAVİ RENGİ OKU
+  // ------------------------------------------------
+  digitalWrite(S2, LOW);
+  digitalWrite(S3, HIGH);
+  frequency = pulseIn(sensorOut, LOW);
+  
+  b_val = map(frequency, b_min, b_max, 255, 0);
+  b_val = constrain(b_val, 0, 255);
+  delay(50);
+
+  // ------------------------------------------------
+  // 4. VERİYİ PYTHON'A GÖNDER
+  // ------------------------------------------------
+  // Python şu formatı bekliyor: "120,130,140" (Virgülle ayrılmış)
+  
+  Serial.print(r_val);
+  Serial.print(",");
+  Serial.print(g_val);
+  Serial.print(",");
+  Serial.println(b_val); // Satır sonu (Enter) Python için komutun bittiğini gösterir
+  
+  // Çok hızlı veri yollayıp Python'u kitlememek için bekleme
+  delay(150);
+}
